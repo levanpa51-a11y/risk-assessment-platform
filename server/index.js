@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -15,7 +15,7 @@ app.use(express.json({ limit: '50mb' }));
 const distPath = path.join(__dirname, '..', 'dist');
 app.use(express.static(distPath));
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const BASE_PROMPT = `შენ ხარ შრომის უსაფრთხოების ექსპერტი. გაანალიზე ეს სურათი და მომეცი რისკის შეფასების სრული ინფორმაცია.
 
@@ -74,29 +74,50 @@ const VIDEO_FRAME_PROMPT = `შენ ხარ შრომის უსაფ�
   "confidence": 75
 }`;
 
-async function callOpenAI(imageData, customPrompt) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not configured');
+// Extract base64 data from a data URI (strips "data:image/jpeg;base64," prefix)
+function extractBase64(imageData) {
+  const match = imageData.match(/^data:([^;]+);base64,(.+)$/);
+  if (match) {
+    return { mediaType: match[1], data: match[2] };
+  }
+  // Assume already raw base64 JPEG if no prefix
+  return { mediaType: 'image/jpeg', data: imageData };
+}
+
+async function callClaude(imageData, customPrompt) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not configured');
   }
 
   const prompt = customPrompt || BASE_PROMPT;
+  const { mediaType, data } = extractBase64(imageData);
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+  const validMediaTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const safeMediaType = validMediaTypes.includes(mediaType) ? mediaType : 'image/jpeg';
+
+  const response = await anthropic.messages.create({
+    model: 'claude-opus-4-7',
+    max_tokens: 2000,
     messages: [
       {
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: imageData, detail: 'high' } },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: safeMediaType,
+              data: data,
+            },
+          },
         ],
       },
     ],
-    max_tokens: 2000,
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error('No response from AI');
+  const content = response.content[0]?.type === 'text' ? response.content[0].text : null;
+  if (!content) throw new Error('No response from Claude');
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('Could not parse JSON from response');
@@ -105,7 +126,7 @@ async function callOpenAI(imageData, customPrompt) {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', hasApiKey: !!process.env.OPENAI_API_KEY });
+  res.json({ status: 'ok', hasApiKey: !!process.env.ANTHROPIC_API_KEY });
 });
 
 // Photo-based image analysis
@@ -114,7 +135,7 @@ app.post('/api/analyze-image', async (req, res) => {
     const { image, prompt } = req.body;
     if (!image) return res.status(400).json({ error: 'Image is required' });
 
-    const result = await callOpenAI(image, prompt);
+    const result = await callClaude(image, prompt);
     res.json(result);
   } catch (error) {
     console.error('Image analysis error:', error);
@@ -128,7 +149,7 @@ app.post('/api/analyze-video-frame', async (req, res) => {
     const { image, prompt } = req.body;
     if (!image) return res.status(400).json({ error: 'Frame image is required' });
 
-    const result = await callOpenAI(image, prompt || VIDEO_FRAME_PROMPT);
+    const result = await callClaude(image, prompt || VIDEO_FRAME_PROMPT);
     res.json(result);
   } catch (error) {
     console.error('Video frame analysis error:', error);
@@ -146,7 +167,7 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Risk Assessment Server running on port ${PORT}`);
-  console.log(`OpenAI API Key configured: ${!!process.env.OPENAI_API_KEY}`);
+  console.log(`Anthropic API Key configured: ${!!process.env.ANTHROPIC_API_KEY}`);
   console.log(`Open in browser: http://localhost:${PORT}`);
   console.log(`On Android: http://<your-ip>:${PORT}`);
 });

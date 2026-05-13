@@ -27,7 +27,6 @@ export interface AIAnalysisResult {
 
 const API_CONFIG = {
   backendEndpoint: import.meta.env.VITE_API_ENDPOINT || '/api/analyze-image',
-  openaiApiKey: import.meta.env.VITE_OPENAI_API_KEY || '',
   timeout: 60000,
 };
 
@@ -94,16 +93,7 @@ export async function analyzeImageWithAI(imageBase64: string): Promise<AIAnalysi
     const result = await tryBackendAPI(imageBase64, ANALYSIS_PROMPT);
     if (result) return validateAndNormalizeResult(result);
   } catch {
-    console.log('Backend API not available, trying direct OpenAI call');
-  }
-
-  if (API_CONFIG.openaiApiKey) {
-    try {
-      const result = await callOpenAIDirectly(imageBase64, ANALYSIS_PROMPT);
-      return validateAndNormalizeResult(result);
-    } catch (error) {
-      console.error('OpenAI API call failed:', error);
-    }
+    console.log('Backend API not available, running in demo mode');
   }
 
   return generateIntelligentDemoAnalysis(imageBase64);
@@ -123,16 +113,7 @@ export async function analyzeVideoFrame(frameBase64: string): Promise<AIAnalysis
     const result = await tryBackendAPI(frameBase64, VIDEO_FRAME_PROMPT);
     if (result) return validateAndNormalizeResult(result);
   } catch {
-    console.log('Backend not available for video frame, trying direct call');
-  }
-
-  if (API_CONFIG.openaiApiKey) {
-    try {
-      const result = await callOpenAIDirectly(frameBase64, VIDEO_FRAME_PROMPT);
-      return validateAndNormalizeResult(result);
-    } catch (error) {
-      console.error('OpenAI video frame analysis failed:', error);
-    }
+    console.log('Backend not available for video frame, running in demo mode');
   }
 
   return generateIntelligentDemoAnalysis(frameBase64);
@@ -151,40 +132,6 @@ async function tryBackendAPI(imageBase64: string, prompt?: string, endpoint?: st
   return response.json();
 }
 
-async function callOpenAIDirectly(imageBase64: string, prompt: string): Promise<any> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_CONFIG.openaiApiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: imageBase64, detail: 'high' } },
-          ],
-        },
-      ],
-      max_tokens: 2000,
-    }),
-    signal: AbortSignal.timeout(API_CONFIG.timeout),
-  });
-
-  if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('No response from OpenAI');
-
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Could not parse JSON from OpenAI response');
-
-  return JSON.parse(jsonMatch[0]);
-}
 
 function validateAndNormalizeResult(result: any): AIAnalysisResult {
   return {
@@ -225,7 +172,7 @@ function generateIntelligentDemoAnalysis(imageBase64: string): AIAnalysisResult 
   const scenarios: AIAnalysisResult[] = [
     {
       hazardName: '⚠️ DEMO: ელექტრო საფრთხე',
-      description: 'ეს არის DEMO რეჟიმი. რეალური AI ანალიზისთვის საჭიროა OpenAI API Key კონფიგურაცია.',
+      description: 'ეს არის DEMO რეჟიმი. რეალური AI ანალიზისთვის საჭიროა ANTHROPIC_API_KEY კონფიგურაცია სერვერზე.',
       category: 'electrical',
       location: 'სამუშაო სივრცე',
       affectedPersons: 'ელექტრიკოსი, ტექნიკური პერსონალი',
@@ -240,7 +187,7 @@ function generateIntelligentDemoAnalysis(imageBase64: string): AIAnalysisResult 
         administrative: 'DEMO: ტრენინგი',
         ppe: 'DEMO: დიელექტრიკული ხელთათმანები',
       },
-      recommendations: '⚠️ DEMO - დააყენეთ VITE_OPENAI_API_KEY ან გაუშვით backend',
+      recommendations: '⚠️ DEMO - დააყენეთ ANTHROPIC_API_KEY სერვერზე და გაუშვით backend',
       responsiblePerson: 'შ/უ სპეციალისტი',
       deadline: '1 კვირა',
       reviewPeriod: 'ყოველთვიური',
@@ -416,7 +363,7 @@ export async function checkAIServiceAvailability(): Promise<{
   apiKeyConfigured: boolean;
 }> {
   let backendAvailable = false;
-  const apiKeyConfigured = !!API_CONFIG.openaiApiKey;
+  const apiKeyConfigured = false;
 
   try {
     const response = await fetch('/api/health', {
